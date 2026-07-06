@@ -5,3 +5,8 @@
 .env
 highschool-rag-pipeline-108775e04702.json
 MATH_Grade10_Semester2_QTR_AR.pdf
+
+ragkit/__pycache__
+ragkit/chunk/__pycache__
+ragkit/extract/__pycache__
+experiments/__pycache__
