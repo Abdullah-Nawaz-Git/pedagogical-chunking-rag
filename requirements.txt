@@ -1,0 +1,14 @@
+pymupdf==1.24.10
+google-genai==0.3.0
+pinecone==5.3.1
+pydantic==2.9.2
+python-dotenv==1.0.1
+tqdm==4.66.5
+pillow==10.4.0
+cloudinary==1.41.0
+
+# Used by the OCR baselines (ingest-B1.py / ingest-B2.py).
+# Requires the Tesseract engine + Arabic language data installed on the system:
+#   macOS:        brew install tesseract tesseract-lang
+#   Debian/Ubuntu: apt-get install tesseract-ocr tesseract-ocr-ara
+pytesseract==0.3.13
