@@ -12,9 +12,7 @@ The goal of centralising configuration is twofold:
     2. Pipeline functions accept these values as plain arguments, so nothing in
        the codebase reaches for a hidden module-level global.
 
-None of the default values changed during the refactor — they are exactly the
-constants that previously lived at the top of ``ingest.py`` and the baseline
-scripts.
+
 """
 
 from __future__ import annotations
@@ -121,7 +119,7 @@ class EnvVars:
 # EXPERIMENT CONFIG
 # ════════════════════════════════════════════
 
-# The legal values for the two variables under study.
+# Two variables under study.
 EXTRACTION_GEMINI = "gemini"
 EXTRACTION_TESSERACT = "tesseract"
 
