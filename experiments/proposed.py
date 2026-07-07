@@ -1,10 +1,9 @@
-"""Proposed pipeline: Gemini structured extraction + pedagogical chunking.
+"""Proposed pipeline: VLM structured extraction + pedagogical chunking.
 
 This is the main pipeline under study. Each PDF page is extracted with Gemini
 vision into structured pedagogical blocks (with diagram crops uploaded to
 Cloudinary), then chunked block-by-block so that each chunk corresponds to a
-coherent pedagogical unit. Chunks are embedded with Gemini and upserted to the
-``curriculum-highschool`` Pinecone index.
+coherent pedagogical unit. Chunks are embedded with Gemini and upserted to the Pinecone index.
 
 Run with:
 
