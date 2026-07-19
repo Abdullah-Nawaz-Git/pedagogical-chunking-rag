@@ -3,8 +3,8 @@
 /cache_b2
 /Knowledge_Base
 .env
-highschool-rag-pipeline-108775e04702.json
-MATH_Grade10_Semester2_QTR_AR.pdf
+credentials.json
+textbook-s2.pdf
 
 ragkit/__pycache__
 ragkit/chunk/__pycache__
