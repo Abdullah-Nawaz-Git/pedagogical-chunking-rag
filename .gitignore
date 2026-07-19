@@ -5,6 +5,7 @@
 .env
 credentials.json
 textbook-s2.pdf
+*.xlsx
 
 ragkit/__pycache__
 ragkit/chunk/__pycache__
