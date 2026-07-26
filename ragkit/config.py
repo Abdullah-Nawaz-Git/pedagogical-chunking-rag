@@ -195,7 +195,7 @@ class QAQuotas:
     definition_recall: int = 30
     theorem_statement: int = 30
     formula_retrieval: int = 30
-    diagram_dependent: int = 30
+    diagram_dependent: int = 20
     worked_example_reasoning: int = 30
 
     def as_dict(self) -> "dict[str, int]":
