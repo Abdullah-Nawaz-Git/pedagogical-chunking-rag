@@ -8,7 +8,7 @@ The QA-dataset orchestrator + CLI.
     select     Stage 1  — choose Proposed chunks → source_selection_plan.jsonl
     generate   Stages 2-3 — LLM candidate generation → qa_candidates.jsonl
     validate   Stage 4  — deterministic filtering → qa_validated.jsonl
-    finalize   Stage 5  — freeze the 180-item dataset → qa_dataset_v1.*
+    finalize   Stage 5  — freeze the 150-item dataset → qa_dataset_v1.*
     map-gold   Stage 6  — B1/B2/Proposed gold maps → gold_mapping_*.jsonl
     all        run select → generate → validate → finalize → map-gold
 

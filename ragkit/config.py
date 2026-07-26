@@ -178,27 +178,25 @@ class ExperimentConfig:
 # from the Proposed pedagogical chunks, then maps gold provenance onto the B1,
 # B2, and Proposed retrieval corpora.
 
-# The six question types produced by the pipeline, in canonical order.
+# The five question types produced by the pipeline, in canonical order.
 QA_QUESTION_TYPES: tuple[str, ...] = (
     "definition_recall",
     "theorem_statement",
     "formula_retrieval",
     "diagram_dependent",
     "worked_example_reasoning",
-    "cross_lesson_application",
 )
 
 
 @dataclass(frozen=True)
 class QAQuotas:
-    """Exact number of final QA items required per question type (sums to 180)."""
+    """Exact number of final QA items required per question type (sums to 150)."""
 
     definition_recall: int = 30
     theorem_statement: int = 30
     formula_retrieval: int = 30
     diagram_dependent: int = 30
     worked_example_reasoning: int = 30
-    cross_lesson_application: int = 30
 
     def as_dict(self) -> "dict[str, int]":
         return {t: getattr(self, t) for t in QA_QUESTION_TYPES}
@@ -264,7 +262,7 @@ class QAConfig:
 
     # ── Dataset identity / sizing ────────────────────────────────────────
     dataset_version: str = "v1.0"
-    target_total: int = 180
+    target_total: int = 150
     candidates_per_task: int = 2
     random_seed: int = 42
 

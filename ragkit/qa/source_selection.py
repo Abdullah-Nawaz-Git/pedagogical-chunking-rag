@@ -5,7 +5,7 @@ ragkit.qa.source_selection
 Stage 1 — choose Proposed chunks and emit deterministic generation tasks.
 
 QA generation draws ONLY from the Proposed pedagogical chunks; B1/B2 are never
-a QA source. For each of the six question types this module applies the
+a QA source. For each of the five question types this module applies the
 type-specific eligibility rules from the specification, then greedily selects a
 surplus of tasks under two fairness constraints:
 
@@ -15,10 +15,6 @@ surplus of tasks under two fairness constraints:
 
 Selection is fully deterministic given ``random_seed``: the eligible pool is
 shuffled with a seeded RNG and then walked in that fixed order.
-
-Cross-lesson application is special: semantic relationships are never inferred.
-Instead we export a candidate CSV + a pairs template for a human to fill in, and
-only turn author-approved, validated pairs into tasks.
 """
 
 from __future__ import annotations
@@ -26,9 +22,8 @@ from __future__ import annotations
 import logging
 import math
 import random
-from collections import Counter, defaultdict
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections import Counter
+from typing import Any, Callable, Dict, List, Tuple
 
 from .. import config as cfg
 from . import schemas
@@ -163,12 +158,6 @@ def _make_task(
             source_content_types.append(ct)
         payloads.append(schemas.build_source_payload(chunk))
 
-    reason = (
-        "cross_lesson_pair"
-        if question_type == "cross_lesson_application"
-        else _selection_reason(question_type, chunks[0])
-    )
-
     return {
         "task_id": f"task-{task_index:06d}",
         "question_type": question_type,
@@ -177,8 +166,7 @@ def _make_task(
         "source_page_numbers": sorted(p for p in source_page_numbers if isinstance(p, int)),
         "lesson_numbers": lesson_numbers,
         "source_content_types": source_content_types,
-        "selection_reason": reason,
-        # A cross-lesson task keeps a payload per chunk; single-source tasks keep one.
+        "selection_reason": _selection_reason(question_type, chunks[0]),
         "source_payload": payloads[0] if len(payloads) == 1 else None,
         "source_payloads": payloads,
     }
@@ -259,102 +247,6 @@ def _select_single_source_type(
 
 
 # ════════════════════════════════════════════
-# CROSS-LESSON HANDLING
-# ════════════════════════════════════════════
-
-_CROSS_LESSON_CSV_COLUMNS = (
-    "chunk_id",
-    "source_block_ids",
-    "source_page_numbers",
-    "lesson_number",
-    "lesson_title_ar",
-    "content_type",
-    "heading_ar",
-    "text_preview",
-    "math_expressions",
-    "has_diagram",
-)
-
-
-def export_cross_lesson_candidates(
-    chunks: List[Dict[str, Any]],
-    layout: schemas.QAOutputLayout,
-) -> Tuple[Path, Path]:
-    """Write the cross-lesson candidate CSV and the (empty) pairs template."""
-    rows: List[Dict[str, Any]] = []
-    for chunk in chunks:
-        if not _has_text(chunk):
-            continue
-        text = (chunk.get("main_text_ar") or "").strip()
-        rows.append(
-            {
-                "chunk_id": chunk.get("chunk_id"),
-                "source_block_ids": chunk.get("source_block_ids") or [],
-                "source_page_numbers": chunk.get("source_page_numbers") or [],
-                "lesson_number": chunk.get("lesson_number") or "",
-                "lesson_title_ar": chunk.get("lesson_title_ar") or "",
-                "content_type": chunk.get("content_type") or "",
-                "heading_ar": chunk.get("heading_ar") or "",
-                "text_preview": text[:200],
-                "math_expressions": chunk.get("math_expressions") or [],
-                "has_diagram": bool(chunk.get("has_diagram")),
-            }
-        )
-    csv_path = schemas.write_csv(layout.cross_lesson_candidates, rows, _CROSS_LESSON_CSV_COLUMNS)
-
-    template = {
-        "pair_id": "cross-001",
-        "source_chunk_id_a": "",
-        "source_chunk_id_b": "",
-        "selection_note": "",
-    }
-    schemas.write_jsonl(layout.cross_lesson_pairs_template, [template])
-    logger.info(
-        "Cross-lesson: wrote %d candidate rows to %s and a template to %s",
-        len(rows), csv_path, layout.cross_lesson_pairs_template,
-    )
-    return csv_path, layout.cross_lesson_pairs_template
-
-
-def _load_cross_lesson_tasks(
-    chunks_by_id: Dict[str, Dict[str, Any]],
-    layout: schemas.QAOutputLayout,
-    start_index: int,
-) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Validate author-supplied pairs and turn valid ones into tasks."""
-    warnings: List[str] = []
-    pairs_path = layout.cross_lesson_pairs
-    if not pairs_path.exists():
-        warnings.append(
-            f"No {pairs_path.name} found — cross_lesson_application produced 0 tasks. "
-            "Fill in cross_lesson_pairs.jsonl from the exported candidates."
-        )
-        return [], warnings
-
-    tasks: List[Dict[str, Any]] = []
-    index = start_index
-    for pair in schemas.read_jsonl(pairs_path):
-        pid = pair.get("pair_id", "<unknown>")
-        a_id = pair.get("source_chunk_id_a")
-        b_id = pair.get("source_chunk_id_b")
-        chunk_a = chunks_by_id.get(a_id)
-        chunk_b = chunks_by_id.get(b_id)
-        if not chunk_a or not chunk_b:
-            warnings.append(f"pair {pid}: unknown chunk id(s) {a_id!r}/{b_id!r} — skipped")
-            continue
-        if _lesson_of(chunk_a) == _lesson_of(chunk_b):
-            warnings.append(f"pair {pid}: both chunks are from the same lesson — skipped")
-            continue
-        task = _make_task(index, "cross_lesson_application", [chunk_a, chunk_b])
-        task["pair_id"] = pid
-        if pair.get("selection_note"):
-            task["selection_note"] = pair["selection_note"]
-        tasks.append(task)
-        index += 1
-    return tasks, warnings
-
-
-# ════════════════════════════════════════════
 # TOP-LEVEL STAGE ENTRY POINT
 # ════════════════════════════════════════════
 
@@ -372,7 +264,6 @@ def run_source_selection(
     """
     layout.ensure()
     chunks = schemas.load_chunks(config.proposed_chunks_path)
-    chunks_by_id = {c.get("chunk_id"): c for c in chunks}
     logger.info("Loaded %d Proposed chunks from %s", len(chunks), config.proposed_chunks_path)
 
     rng = random.Random(config.random_seed)
@@ -384,10 +275,8 @@ def run_source_selection(
     quotas = config.quotas.as_dict()
     task_index = 1
 
-    # Single-source types first (deterministic order = QUESTION_TYPES order).
+    # Single-source types in canonical QUESTION_TYPES order.
     for question_type in schemas.QUESTION_TYPES:
-        if question_type == "cross_lesson_application":
-            continue
         quota = quotas[question_type]
         target_tasks = math.ceil(quota * _CANDIDATE_SURPLUS_FACTOR / config.candidates_per_task)
         # A fresh RNG per type keeps ordering independent of prior consumption.
@@ -405,25 +294,6 @@ def run_source_selection(
                 f"(target {target_tasks}); {report['eligible']} chunks eligible."
             )
 
-    # Cross-lesson from author-approved pairs.
-    cross_tasks, cross_warnings = _load_cross_lesson_tasks(chunks_by_id, layout, task_index)
-    all_tasks.extend(cross_tasks)
-    warnings.extend(cross_warnings)
-    reports.append(
-        {
-            "question_type": "cross_lesson_application",
-            "eligible": None,
-            "target_tasks": math.ceil(
-                quotas["cross_lesson_application"] * _CANDIDATE_SURPLUS_FACTOR
-                / config.candidates_per_task
-            ),
-            "selected_tasks": len(cross_tasks),
-            "deficit": None,
-            "lessons": {},
-            "content_types": {},
-        }
-    )
-
     approx_candidates = len(all_tasks) * config.candidates_per_task
     summary = {
         "total_tasks": len(all_tasks),
@@ -440,8 +310,6 @@ def run_source_selection(
 
     schemas.write_jsonl(layout.source_selection_plan, all_tasks)
     schemas.write_json(layout.config_used, schemas.config_to_dict(config))
-    # Always (re)export the cross-lesson candidate scaffolding during select.
-    export_cross_lesson_candidates(chunks, layout)
 
     logger.info(
         "Stage 1 complete: %d tasks (~%d candidates) → %s",
