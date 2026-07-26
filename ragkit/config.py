@@ -168,3 +168,129 @@ class ExperimentConfig:
     fixed_chunk: FixedChunkConfig = field(default_factory=FixedChunkConfig)
     index: IndexConfig = field(default_factory=IndexConfig)
     env: EnvVars = field(default_factory=EnvVars)
+
+
+# ════════════════════════════════════════════
+# QA-DATASET PREPARATION CONFIG
+# ════════════════════════════════════════════
+#
+# The QA-dataset pipeline (``ragkit.qa``) prepares ONE Arabic QA dataset
+# from the Proposed pedagogical chunks, then maps gold provenance onto the B1,
+# B2, and Proposed retrieval corpora.
+
+# The six question types produced by the pipeline, in canonical order.
+QA_QUESTION_TYPES: tuple[str, ...] = (
+    "definition_recall",
+    "theorem_statement",
+    "formula_retrieval",
+    "diagram_dependent",
+    "worked_example_reasoning",
+    "cross_lesson_application",
+)
+
+
+@dataclass(frozen=True)
+class QAQuotas:
+    """Exact number of final QA items required per question type (sums to 180)."""
+
+    definition_recall: int = 30
+    theorem_statement: int = 30
+    formula_retrieval: int = 30
+    diagram_dependent: int = 30
+    worked_example_reasoning: int = 30
+    cross_lesson_application: int = 30
+
+    def as_dict(self) -> "dict[str, int]":
+        return {t: getattr(self, t) for t in QA_QUESTION_TYPES}
+
+
+@dataclass(frozen=True)
+class QASelectionConfig:
+    """Stage-1 source-selection knobs."""
+
+    # A single Proposed chunk may seed at most this many generation tasks.
+    max_questions_per_source_chunk: int = 2
+    # Soft cap: try to keep any one lesson below this fraction of a type's tasks.
+    max_lesson_fraction: float = 0.30
+    # Worked-example chunks shorter than this are treated as incomplete prompts.
+    min_example_characters: int = 250
+    # content_type values eligible for worked_example_reasoning.
+    allowed_example_types: tuple[str, ...] = ("example", "worked_example", "explore")
+
+
+@dataclass(frozen=True)
+class QAB2MappingConfig:
+    """B2 gold-mapping source-block coverage thresholds."""
+
+    ordinary_min_source_block_coverage: float = 0.80
+    worked_example_min_source_block_coverage: float = 1.00
+
+
+@dataclass(frozen=True)
+class QAProposedMappingConfig:
+    """Proposed gold-mapping source-block coverage threshold."""
+
+    minimum_source_block_coverage: float = 0.99
+
+
+@dataclass(frozen=True)
+class QAValidationConfig:
+    """Stage-4 deterministic validation limits + banned question phrases."""
+
+    min_question_characters: int = 8
+    min_answer_characters: int = 8
+    max_question_characters: int = 500
+    max_answer_characters: int = 1200
+    # Phrases that leak retrieval-artifact context into the question. Compared
+    # after Arabic normalisation, so store them normalised-friendly.
+    banned_question_phrases: tuple[str, ...] = (
+        "الصفحة",
+        "في الصفحة",
+        "النص أعلاه",
+        "في النص",
+        "الشكل أعلاه",
+        "الرسم أعلاه",
+        "القطعة أعلاه",
+    )
+
+
+@dataclass(frozen=True)
+class QAConfig:
+    """Complete description of a QA-dataset preparation run.
+
+    Defaults mirror the project specification. An optional ``--config`` file may
+    override any subset of these values (see ``ragkit.qa.schemas.load_qa_config``).
+    """
+
+    # ── Dataset identity / sizing ────────────────────────────────────────
+    dataset_version: str = "v1.0"
+    target_total: int = 180
+    candidates_per_task: int = 2
+    random_seed: int = 42
+
+    # ── Nested knob groups ───────────────────────────────────────────────
+    quotas: QAQuotas = field(default_factory=QAQuotas)
+    selection: QASelectionConfig = field(default_factory=QASelectionConfig)
+    b2_mapping: QAB2MappingConfig = field(default_factory=QAB2MappingConfig)
+    proposed_mapping: QAProposedMappingConfig = field(default_factory=QAProposedMappingConfig)
+    validation: QAValidationConfig = field(default_factory=QAValidationConfig)
+
+    # ── Filesystem inputs / output ───────────────────────────────────────
+    # Proposed pedagogical chunks — the ONLY QA-generation source.
+    proposed_chunks_path: str = "cache/chunks.json"
+    # B1 (OCR) and B2 (fixed) chunks — used only for gold mapping.
+    b1_chunks_path: str = "cache_b1/chunks.json"
+    b2_chunks_path: str = "cache_b2/chunks.json"
+    # Directory that receives every QA artifact.
+    output_dir: str = "qa_dataset"
+
+    # ── Generation provenance (never a hard-coded model/key) ─────────────
+    # Provider is chosen at the CLI ("mock" | "vertex"); the model comes from
+    # the environment variable named below so no model id is baked into code.
+    provider: str = "mock"
+    generation_model_env_var: str = "QA_GENERATION_MODEL"
+    generation_model_default: str = "gemini-3.1-pro-preview"
+    generation_temperature: float = 1.0
+    generation_prompt_version: str = "v1"
+    # Recorded on every QA item so the dataset is traceable to its corpus.
+    source_corpus_version: str = "v1.0"

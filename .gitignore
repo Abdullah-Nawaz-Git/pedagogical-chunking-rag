@@ -9,6 +9,8 @@ textbook-s2.pdf
 *.csv
 
 ragkit/__pycache__
+ragkit/qa/__pycache__
 ragkit/chunk/__pycache__
 ragkit/extract/__pycache__
 experiments/__pycache__
+qa_dataset/
