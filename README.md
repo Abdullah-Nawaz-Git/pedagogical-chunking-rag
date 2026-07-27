@@ -83,9 +83,12 @@ All experiments also support:
 - `--stop-after-texts` to stop after chunk creation and writing
   `embedding_texts.jsonl`/`chunks.json`, skipping final chunk embedding and
   Pinecone upsert stages
+- `--embed-only` to skip render/extract/chunk stages and jump straight to
+  embedding + Pinecone upsert using cached `chunks.json` and
+  `embedding_texts.jsonl`
 
 
-- **`-provenance-only` flag** (in `pipeline.py`)
+- **`--provenance-only` flag** (in `pipeline.py`)
 - Available on all three experiments. When set it forces `chunk_only=True` (skip render/extract/crop for Gemini experiments — reuses the cached `page_*.json` extractions) and `stop_after_texts=True` (skip embedding + Pinecone upsert).
 - Net effect: rebuilds `chunks.json`, `embedding_texts.jsonl`, and the `_provenance.jsonl` files cheaply, with no Gemini calls and no vector writes. Run e.g. `python -m experiments.b2 --pdf ... --semester 2 --provenance-only`.
 

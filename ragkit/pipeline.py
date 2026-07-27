@@ -53,6 +53,7 @@ class RunArgs:
     # Only meaningful for experiments that use diagrams (proposed, B3).
     skip_bbox: bool = False
     chunk_only: bool = False
+    embed_only: bool = False
     stop_after_texts: bool = False
     # Regenerate chunk/provenance artifacts only: reuse cached extractions
     # (no re-render/re-extract) and stop before embedding + Pinecone upsert.
@@ -82,6 +83,14 @@ def build_arg_parser(config: cfg.ExperimentConfig) -> argparse.ArgumentParser:
         "--stop-after-texts",
         action="store_true",
         help="Stop after writing embedding_texts.jsonl/chunks.json; skip Stage 3B embedding and Stage 3C Pinecone upsert",
+    )
+    parser.add_argument(
+        "--embed-only",
+        action="store_true",
+        help=(
+            "Skip render/extract/chunk stages and load cached chunks.json + "
+            "embedding_texts.jsonl, then run Stage 3B embedding and Stage 3C Pinecone upsert only"
+        ),
     )
     parser.add_argument(
         "--provenance-only",
@@ -125,7 +134,12 @@ def parse_args(config: cfg.ExperimentConfig, argv: Optional[Sequence[str]] = Non
 
     provenance_only = bool(getattr(args, "provenance_only", False))
     chunk_only = bool(getattr(args, "chunk_only", False))
+    embed_only = bool(getattr(args, "embed_only", False))
     stop_after_texts = bool(getattr(args, "stop_after_texts", False))
+
+    if embed_only and (provenance_only or stop_after_texts):
+        print("--embed-only cannot be combined with --provenance-only or --stop-after-texts", file=sys.stderr)
+        sys.exit(2)
 
     # --provenance-only is a convenience switch: rebuild chunk + provenance
     # artifacts from cached extractions without re-running the expensive
@@ -144,6 +158,7 @@ def parse_args(config: cfg.ExperimentConfig, argv: Optional[Sequence[str]] = Non
         end_page=args.end_page,
         skip_bbox=bool(getattr(args, "skip_bbox", False)),
         chunk_only=chunk_only,
+        embed_only=embed_only,
         stop_after_texts=stop_after_texts,
         provenance_only=provenance_only,
     )
@@ -467,6 +482,59 @@ def _write_chunk_and_text_artifacts(
     )
 
 
+def _load_cached_chunk_and_text_artifacts(
+    cache_root: Path,
+) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Load chunks.json and embedding_texts.jsonl from a cache directory."""
+    from .qa.schemas import load_chunks
+
+    chunks_path = cache_root / "chunks.json"
+    text_cache_path = cache_root / "embedding_texts.jsonl"
+
+    if not chunks_path.exists():
+        print(f"Missing cached chunks file: {chunks_path}", file=sys.stderr)
+        sys.exit(2)
+    if not text_cache_path.exists():
+        print(f"Missing cached embedding texts file: {text_cache_path}", file=sys.stderr)
+        sys.exit(2)
+
+    chunks = load_chunks(chunks_path)
+    text_records: List[Dict[str, Any]] = []
+    with open(text_cache_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                print(
+                    f"Expected JSON objects in {text_cache_path}, got {type(record).__name__}",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            text_records.append(record)
+
+    if len(chunks) != len(text_records):
+        print(
+            f"Cached chunk/text count mismatch: {len(chunks)} chunks vs {len(text_records)} text records",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    texts: List[str] = []
+    for chunk, record in zip(chunks, text_records):
+        if record.get("chunk_id") != chunk.get("chunk_id"):
+            print(
+                "Cached chunk/text order mismatch: "
+                f"{record.get('chunk_id')} != {chunk.get('chunk_id')}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        texts.append(str(record.get("text") or ""))
+
+    return chunks, texts
+
+
 # ════════════════════════════════════════════
 # ORCHESTRATOR
 # ════════════════════════════════════════════
@@ -500,7 +568,7 @@ def run(config: cfg.ExperimentConfig, argv: Optional[Sequence[str]] = None) -> i
     )
     pc = Pinecone(api_key=env.pinecone_api_key)
 
-    if config.uses_diagrams and not args.skip_bbox and not args.chunk_only:
+    if config.uses_diagrams and not args.skip_bbox and not args.chunk_only and not args.embed_only:
         cloudinary.config(
             cloud_name=env.cloudinary_cloud_name,
             api_key=env.cloudinary_api_key,
@@ -511,7 +579,10 @@ def run(config: cfg.ExperimentConfig, argv: Optional[Sequence[str]] = None) -> i
     page_dimensions: Dict[str, Dict[str, int]] = {}
 
     # ── Extraction + chunking (the variables under study) ────────────────
-    if config.extraction == cfg.EXTRACTION_GEMINI:
+    if args.embed_only:
+        logging.info("Stage 3A skipped (--embed-only): loading cached chunks/texts")
+        chunks, texts = _load_cached_chunk_and_text_artifacts(layout.root)
+    elif config.extraction == cfg.EXTRACTION_GEMINI:
         page_dimensions = _run_gemini_extraction(config, args, layout, vertex_client)
 
         if config.chunking == cfg.CHUNKING_PEDAGOGICAL:
