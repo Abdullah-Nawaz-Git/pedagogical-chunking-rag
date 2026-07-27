@@ -7,7 +7,8 @@ coherent pedagogical unit. Chunks are embedded with Gemini and upserted to the P
 
 Run with:
 
-    python -m experiments.proposed --pdf book.pdf --semester 1
+    python -m experiments.proposed --pdf /Users/abdullah/QUYSC-Project/pedagogical-chunking-rag/textbook-s2.pdf --semester 2 --provenance-only --start-page 15 --end-page 236 
+
 
 See ``--help`` for the full set of options (page ranges, cache dir, resume
 flags, etc.). All knobs default to the values that previously lived at the top
