@@ -27,13 +27,14 @@ SHARED_SYSTEM_PROMPT = """You are creating an Arabic QA item for a Grade 10 math
 Use only the supplied source evidence.
 Do not use external mathematical knowledge.
 Do not invent values, formulas, mathematical relationships, labels, steps, or definitions.
-Do not mention page numbers, chunks, "the text", "above", or "the diagram above".
+Do not mention page numbers, chunks, "the text", "above", or "the diagram above", or exact tehorem / excercise / example numbers but include enough context in the question for semantic search to work.
 Write a clear Modern Standard Arabic question and a Arabic reference answer from the provided content.
+Questions should have enough information for semantic search to find the relevant information for the answer.
 Preserve mathematical notation accurately when necessary.
 Return strict JSON only."""
 
 # The exact JSON object the model must return.
-OUTPUT_SCHEMA_HINT = """Return empty array if question is about vocabulary list / table of contents. Return ONLY this JSON object, with no text before or after it:
+OUTPUT_SCHEMA_HINT = """Return ONLY this JSON object, with no text before or after it:
 
 {
   "question_ar": "",
@@ -56,11 +57,14 @@ _TYPE_INSTRUCTIONS: Dict[str, str] = {
         "Task type: theorem_statement.\n"
         "Ask for the complete statement of the theorem, including its condition "
         "and/or formula when present in the source.\n"
+        "Describe what theorem you are asking for.\n"
+        "Do not mentioin the theorem number or ask a question like What does theorem 4 state. istead ask realted to topic so that semantic searech can pick it up.\n"
         "The answer must be extractive (answer_mode=\"extractive\")."
     ),
     "formula_retrieval": (
         "Task type: formula_retrieval.\n"
         "Ask for a formula that is explicitly stated in the source evidence.\n"
+        "include enough context for the formula in the question for semantic search to work\n"
         "Set required_formula=true. The answer must be extractive.\n"
         "Preserve the LaTeX notation of the formula exactly."
     ),
@@ -68,12 +72,14 @@ _TYPE_INSTRUCTIONS: Dict[str, str] = {
         "Task type: diagram_dependent.\n"
         "Write a question whose answer REQUIRES the supplied diagram description "
         "and/or its labels — it must not be answerable from prose alone. Describe the diagram in the question itself \n"
+        "include enough context in the question for semantic search to work \n"
         "Set required_diagram=true."
     ),
     "worked_example_reasoning": (
         "Task type: worked_example_reasoning.\n"
         "Ask about the method or the steps SHOWN in the worked example — do not "
         "invent a new mathematical exercise. Give context for the problem in the question itself \n"
+        "include enough context in the question for semantic search to work \n"
         "Set answer_mode=\"reasoning\"."
     ),
 }

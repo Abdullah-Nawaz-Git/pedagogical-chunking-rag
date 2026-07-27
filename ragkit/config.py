@@ -192,11 +192,11 @@ QA_QUESTION_TYPES: tuple[str, ...] = (
 class QAQuotas:
     """Exact number of final QA items required per question type (sums to 150)."""
 
-    definition_recall: int = 30
-    theorem_statement: int = 30
-    formula_retrieval: int = 30
+    definition_recall: int = 20
+    theorem_statement: int = 20
+    formula_retrieval: int = 20
     diagram_dependent: int = 20
-    worked_example_reasoning: int = 30
+    worked_example_reasoning: int = 20
 
     def as_dict(self) -> "dict[str, int]":
         return {t: getattr(self, t) for t in QA_QUESTION_TYPES}
@@ -264,7 +264,7 @@ class QAConfig:
     # ── Dataset identity / sizing ────────────────────────────────────────
     dataset_version: str = "v1.0"
     target_total: int = 150
-    candidates_per_task: int = 2
+    candidates_per_task: int = 1
     random_seed: int = 7
 
     # ── Nested knob groups ───────────────────────────────────────────────

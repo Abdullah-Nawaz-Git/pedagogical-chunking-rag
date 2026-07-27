@@ -188,6 +188,7 @@ def _select_single_source_type(
     """Return selected chunk-groups (each a 1-item list) + a per-type report."""
     predicate = _ELIGIBILITY[question_type]
     eligible = [c for c in chunks if predicate(c, config)]
+    target_tasks = min(target_tasks, len(eligible))
 
     # Deterministic order: seed once per type so ordering is reproducible and
     # independent of the order types are processed in.
