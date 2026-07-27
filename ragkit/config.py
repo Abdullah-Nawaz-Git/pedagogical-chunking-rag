@@ -207,7 +207,7 @@ class QASelectionConfig:
     """Stage-1 source-selection knobs."""
 
     # A single Proposed chunk may seed at most this many generation tasks.
-    max_questions_per_source_chunk: int = 2
+    max_questions_per_source_chunk: int = 1
     # Soft cap: try to keep any one lesson below this fraction of a type's tasks.
     max_lesson_fraction: float = 0.30
     # Worked-example chunks shorter than this are treated as incomplete prompts.
@@ -249,6 +249,7 @@ class QAValidationConfig:
         "الشكل أعلاه",
         "الرسم أعلاه",
         "القطعة أعلاه",
+        "مصطلحات الوحدة",
     )
 
 
@@ -264,7 +265,7 @@ class QAConfig:
     dataset_version: str = "v1.0"
     target_total: int = 150
     candidates_per_task: int = 2
-    random_seed: int = 42
+    random_seed: int = 7
 
     # ── Nested knob groups ───────────────────────────────────────────────
     quotas: QAQuotas = field(default_factory=QAQuotas)

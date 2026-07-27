@@ -28,12 +28,12 @@ Use only the supplied source evidence.
 Do not use external mathematical knowledge.
 Do not invent values, formulas, mathematical relationships, labels, steps, or definitions.
 Do not mention page numbers, chunks, "the text", "above", or "the diagram above".
-Write a clear Modern Standard Arabic question and a concise Arabic reference answer.
+Write a clear Modern Standard Arabic question and a Arabic reference answer from the provided content.
 Preserve mathematical notation accurately when necessary.
 Return strict JSON only."""
 
 # The exact JSON object the model must return.
-OUTPUT_SCHEMA_HINT = """Return ONLY this JSON object, with no text before or after it:
+OUTPUT_SCHEMA_HINT = """Return empty array if question is about vocabulary list / table of contents. Return ONLY this JSON object, with no text before or after it:
 
 {
   "question_ar": "",
@@ -67,13 +67,13 @@ _TYPE_INSTRUCTIONS: Dict[str, str] = {
     "diagram_dependent": (
         "Task type: diagram_dependent.\n"
         "Write a question whose answer REQUIRES the supplied diagram description "
-        "and/or its labels — it must not be answerable from prose alone.\n"
+        "and/or its labels — it must not be answerable from prose alone. Describe the diagram in the question itself \n"
         "Set required_diagram=true."
     ),
     "worked_example_reasoning": (
         "Task type: worked_example_reasoning.\n"
         "Ask about the method or the steps SHOWN in the worked example — do not "
-        "invent a new mathematical exercise.\n"
+        "invent a new mathematical exercise. Give context for the problem in the question itself \n"
         "Set answer_mode=\"reasoning\"."
     ),
 }
