@@ -21,6 +21,7 @@ high-severity warnings; they are never silently removed or rewritten.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -65,6 +66,28 @@ def _b2_threshold(question_type: str, config: cfg.QAConfig) -> float:
     if question_type == "worked_example_reasoning":
         return config.b2_mapping.worked_example_min_source_block_coverage
     return config.b2_mapping.ordinary_min_source_block_coverage
+
+
+_BLOCK_PAGE_RE = re.compile(r"-p(\d+)-b\d+$")
+
+
+def _page_from_block_id(block_id: str) -> Optional[int]:
+    match = _BLOCK_PAGE_RE.search(block_id or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _chunks_overlapping_page(chunks: List[Dict[str, Any]], page: int) -> List[Dict[str, Any]]:
+    hits: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        lo, hi = _page_range(chunk)
+        if lo <= page <= hi:
+            hits.append(chunk)
+    return hits
 
 
 # ════════════════════════════════════════════
@@ -138,6 +161,7 @@ def map_b2_item(
     by_block: Dict[str, List[Dict[str, Any]]] = {}
     all_relevant: List[str] = []
     warnings: List[str] = []
+    used_fallback = False
 
     for block_id in required_blocks:
         hits: List[Dict[str, Any]] = []
@@ -169,6 +193,27 @@ def map_b2_item(
                     )
             if is_relevant:
                 hits.append(entry)
+
+        if not hits:
+            fallback_page = _page_from_block_id(block_id)
+            if fallback_page is None:
+                fallback_pages = [p for p in (qa.get("gold_page_numbers") or []) if isinstance(p, int)]
+                fallback_page = fallback_pages[0] if fallback_pages else None
+            if fallback_page is not None:
+                for chunk in _chunks_overlapping_page(b2_chunks, fallback_page):
+                    entry = {
+                        "chunk_id": chunk.get("chunk_id"),
+                        "page_range": list(_page_range(chunk)),
+                        "fallback_page": fallback_page,
+                        "is_relevant": True,
+                        "mapping_basis": "page_overlap_fallback",
+                    }
+                    hits.append(entry)
+                if hits:
+                    used_fallback = True
+                    warnings.append(
+                        f"B2 fallback used page overlap for gold block {block_id} on page {fallback_page}"
+                    )
         by_block[block_id] = hits
         for hit in hits:
             if hit["chunk_id"] not in all_relevant:
@@ -180,7 +225,9 @@ def map_b2_item(
     return {
         "qa_id": qa["qa_id"],
         "system": "b2",
-        "mapping_method": "source_block_coverage",
+        "mapping_method": "source_block_coverage"
+        if not used_fallback
+        else "source_block_coverage+page_overlap_fallback",
         "required_gold_source_block_ids": required_blocks,
         "relevant_chunks_by_gold_block": by_block,
         "all_relevant_chunk_ids": all_relevant,
