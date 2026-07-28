@@ -514,15 +514,21 @@ def _load_cached_chunk_and_text_artifacts(
                 sys.exit(2)
             text_records.append(record)
 
-    if len(chunks) != len(text_records):
+    # ``chunks.json`` stores every pedagogical chunk, but the embedding cache only
+    # contains the embeddable subset. Filter out non-embeddable "other" chunks
+    # before comparing and aligning the two artefacts.
+    embeddable_chunks = [c for c in chunks if c.get("content_type") != "other"]
+
+    if len(embeddable_chunks) != len(text_records):
         print(
-            f"Cached chunk/text count mismatch: {len(chunks)} chunks vs {len(text_records)} text records",
+            "Cached chunk/text count mismatch: "
+            f"{len(embeddable_chunks)} embeddable chunks vs {len(text_records)} text records",
             file=sys.stderr,
         )
         sys.exit(2)
 
     texts: List[str] = []
-    for chunk, record in zip(chunks, text_records):
+    for chunk, record in zip(embeddable_chunks, text_records):
         if record.get("chunk_id") != chunk.get("chunk_id"):
             print(
                 "Cached chunk/text order mismatch: "
@@ -532,7 +538,7 @@ def _load_cached_chunk_and_text_artifacts(
             sys.exit(2)
         texts.append(str(record.get("text") or ""))
 
-    return chunks, texts
+    return embeddable_chunks, texts
 
 
 # ════════════════════════════════════════════
