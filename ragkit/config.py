@@ -190,7 +190,7 @@ QA_QUESTION_TYPES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class QAQuotas:
-    """Exact number of final QA items required per question type (sums to 150)."""
+    """Exact number of final QA items required per question type (sums to 100)."""
 
     definition_recall: int = 20
     theorem_statement: int = 20
@@ -293,3 +293,197 @@ class QAConfig:
     generation_prompt_version: str = "v1"
     # Recorded on every QA item so the dataset is traceable to its corpus.
     source_corpus_version: str = "v1.0"
+
+
+# ════════════════════════════════════════════
+# RETRIEVAL-EVALUATION CONFIG
+# ════════════════════════════════════════════
+#
+# The retrieval experiments (``ragkit.retrieval``) read the FROZEN QA dataset and
+# the gold mapping artifacts produced by ``ragkit.qa``, query each system's
+# already-built Pinecone index, and score the results. Nothing here regenerates
+# the QA dataset or touches ingestion.
+#
+# Everything that must be held constant for the comparison to be fair lives in
+# ``RetrievalConfig`` / ``AnswerGenerationConfig`` and is shared verbatim by all
+# three systems. The ONLY per-system data is in ``RetrievalSystemConfig``:
+# identity, which index to query, which chunk cache to read, and which gold
+# granularity that system's provenance can legitimately support.
+
+# How a system's gold relevance is defined. This is a *semantic* distinction, not
+# a tuning knob: it records what the system's provenance can actually support.
+GOLD_UNIT_LEVEL = "source_block_unit"   # proposed, B2 — true instructional-unit gold
+GOLD_PAGE_PROXY = "page_overlap_proxy"  # B1 only — page-overlap proxy, NOT unit gold
+
+# The B1 caveat, carried onto every B1 record and printed in every report so a
+# reader can never mistake B1's proxy for true Gold Unit Recall.
+B1_PROXY_DISCLAIMER = (
+    "B1 has no source-block provenance. Its gold relevance is a PAGE-OVERLAP "
+    "PROXY, so the reported recall is Gold Page Recall (proxy), not Gold Unit "
+    "Recall. B1 numbers are not unit-level and must not be read as measuring "
+    "the same quantity as the unit-level recall of Proposed/B2."
+)
+
+
+@dataclass(frozen=True)
+class RetrievalConfig:
+    """Retrieval protocol knobs — IDENTICAL for every system under comparison."""
+
+    # Top-k chunks fetched from the vector index per question.
+    top_k: int = 5
+    # Ranks at which Hit@k is reported (each must be <= top_k).
+    hit_at_ks: tuple[int, ...] = (1, 5)
+    # Query-side embedding task type. The MODEL and DIMENSION come from the
+    # shared ``EmbeddingConfig``, so queries use the same embedding model family
+    # as the documents; only the task type differs (query vs document).
+    query_task_type: str = "RETRIEVAL_QUERY"
+    # Metadata filtering is deliberately DISABLED: a filter would hand each
+    # system a different effective candidate set and invalidate the comparison.
+    use_metadata_filter: bool = False
+    # Pinecone returns metadata (which carries content_text_ar) so generator
+    # context is available even if a chunk is missing from the local cache.
+    include_metadata: bool = True
+    include_values: bool = False
+
+
+@dataclass(frozen=True)
+class AnswerGenerationConfig:
+    """Answer-generation knobs — IDENTICAL for every system under comparison.
+
+    Answer generation is OPTIONAL (``--generate-answers``); retrieval metrics are
+    computed either way. When it runs, all systems share one model, one prompt
+    version, and one context budget so the generator is never a confound.
+    """
+
+    # Provider is chosen at the CLI ("mock" | "vertex"); the model id is read
+    # from the environment variable below so no model id is baked into code.
+    provider: str = "mock"
+    model_env_var: str = "RETRIEVAL_ANSWER_MODEL"
+    model_default: str = "gemini-3.1-pro-preview"
+    # Deterministic decoding: the comparison must not drift between reruns.
+    temperature: float = 0.0
+    prompt_version: str = "v1"
+    # Shared context budget in whitespace tokens (the repo's token convention,
+    # matching FixedChunkConfig). Retrieved chunks are appended in rank order and
+    # the first chunk that would exceed the budget is truncated, so no system
+    # gains an advantage purely from having larger chunks.
+    context_budget_tokens: int = 2560
+    # Used only to report an *estimated* model-token count alongside the exact
+    # whitespace-token count (the same estimate RepresentationConfig uses).
+    chars_per_token: int = 3
+
+
+@dataclass(frozen=True)
+class RetrievalSystemConfig:
+    """The per-system half of a retrieval experiment — configuration only.
+
+    Adding a system means adding one of these; it must never mean adding a
+    branch to the shared engine, metrics, or reporting code.
+    """
+
+    # Identity — matches the ingestion experiment name and the gold-mapping
+    # ``system`` field ("proposed" | "b1" | "b2").
+    name: str
+    # Which Pinecone index to query (already built by the ingestion run).
+    index_env_var: str
+    default_index_name: str
+    # Chunk cache used to resolve retrieved chunk_ids back to text/provenance.
+    chunks_path: str
+    # Gold-mapping artifact for this system, under the QA dataset directory.
+    gold_mapping_filename: str
+    # What this system's provenance can legitimately support (GOLD_* constant).
+    gold_granularity: str = GOLD_UNIT_LEVEL
+    # A non-empty caveat is copied onto every record and every report for this
+    # system. Only B1 sets one.
+    proxy_disclaimer: str = ""
+    # Human-readable label used in report tables.
+    label: str = ""
+
+    @property
+    def is_unit_level(self) -> bool:
+        """True when the system supports true instructional-unit gold."""
+        return self.gold_granularity == GOLD_UNIT_LEVEL
+
+    @property
+    def recall_metric_name(self) -> str:
+        """The name under which this system's recall may honestly be reported."""
+        return "gold_unit_recall" if self.is_unit_level else "gold_page_recall_proxy"
+
+
+@dataclass(frozen=True)
+class RetrievalExperimentConfig:
+    """A complete description of one retrieval-evaluation run.
+
+    Mirrors ``ExperimentConfig``: the per-system variable sits at the top and
+    every shared stage config below it is identical across systems, so the only
+    thing that varies between runs is the system being measured.
+    """
+
+    # ── The system under evaluation ───────────────────────────────────────
+    system: RetrievalSystemConfig
+
+    # ── Frozen inputs (never regenerated by this pipeline) ────────────────
+    qa_dataset_dir: str = "qa_dataset"
+    qa_dataset_filename: str = "qa_dataset_v1.jsonl"
+    # Directory that receives every retrieval artifact.
+    output_dir: str = "retrieval_eval"
+
+    # ── Shared stage configs (identical across systems) ───────────────────
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    answer: AnswerGenerationConfig = field(default_factory=AnswerGenerationConfig)
+    index: IndexConfig = field(default_factory=IndexConfig)
+    env: EnvVars = field(default_factory=EnvVars)
+
+    # ── Behaviour ─────────────────────────────────────────────────────────
+    # "pinecone" queries the real index; "local" scores the cached chunks with a
+    # deterministic offline retriever (no credentials) for smoke-testing.
+    retriever: str = "pinecone"
+    # Whether to run the shared answer generator.
+    generate_answers: bool = False
+    # Ties break on chunk_id rather than on RNG, but recording the seed keeps
+    # run provenance explicit in config_used.json.
+    random_seed: int = 7
+
+
+# The three systems under study. Index names / env vars mirror the ingestion
+# experiments so retrieval reads exactly the indexes ingestion wrote.
+RETRIEVAL_SYSTEM_PROPOSED = RetrievalSystemConfig(
+    name="proposed",
+    index_env_var="PINECONE_INDEX_NAME",
+    default_index_name="curriculum-highschool",
+    chunks_path="cache/chunks.json",
+    gold_mapping_filename="gold_mapping_proposed.jsonl",
+    gold_granularity=GOLD_UNIT_LEVEL,
+    label="Proposed (Gemini + pedagogical chunks)",
+)
+
+RETRIEVAL_SYSTEM_B2 = RetrievalSystemConfig(
+    name="b2",
+    index_env_var="PINECONE_INDEX_NAME_B2",
+    default_index_name="curriculum-highschool-b2",
+    chunks_path="cache_b2/chunks.json",
+    gold_mapping_filename="gold_mapping_b2.jsonl",
+    gold_granularity=GOLD_UNIT_LEVEL,
+    label="B2 (Gemini + fixed 512-token windows)",
+)
+
+RETRIEVAL_SYSTEM_B1 = RetrievalSystemConfig(
+    name="b1",
+    index_env_var="PINECONE_INDEX_NAME_B1",
+    default_index_name="curriculum-highschool-b1",
+    chunks_path="cache_b1/chunks.json",
+    gold_mapping_filename="gold_mapping_b1.jsonl",
+    # B1 keeps no source-block provenance, so unit-level gold is impossible.
+    gold_granularity=GOLD_PAGE_PROXY,
+    proxy_disclaimer=B1_PROXY_DISCLAIMER,
+    label="B1 (Tesseract OCR + fixed 512-token windows)",
+)
+
+# Canonical system order for cross-system reports.
+RETRIEVAL_SYSTEM_ORDER: tuple[str, ...] = ("proposed", "b2", "b1")
+
+RETRIEVAL_SYSTEMS = {
+    system.name: system
+    for system in (RETRIEVAL_SYSTEM_PROPOSED, RETRIEVAL_SYSTEM_B2, RETRIEVAL_SYSTEM_B1)
+}
