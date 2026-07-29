@@ -455,7 +455,7 @@ RETRIEVAL_SYSTEM_PROPOSED = RetrievalSystemConfig(
     chunks_path="cache/chunks.json",
     gold_mapping_filename="gold_mapping_proposed.jsonl",
     gold_granularity=GOLD_UNIT_LEVEL,
-    label="Proposed (Gemini + pedagogical chunks)",
+    label="Proposed (VLM + pedagogical chunks)",
 )
 
 RETRIEVAL_SYSTEM_B2 = RetrievalSystemConfig(
@@ -465,7 +465,7 @@ RETRIEVAL_SYSTEM_B2 = RetrievalSystemConfig(
     chunks_path="cache_b2/chunks.json",
     gold_mapping_filename="gold_mapping_b2.jsonl",
     gold_granularity=GOLD_UNIT_LEVEL,
-    label="B2 (Gemini + fixed 512-token windows)",
+    label="B2 (VLM + fixed 512-token windows)",
 )
 
 RETRIEVAL_SYSTEM_B1 = RetrievalSystemConfig(

@@ -15,3 +15,4 @@ ragkit/chunk/__pycache__
 ragkit/extract/__pycache__
 experiments/__pycache__
 qa_dataset/
+retrieval_eval
