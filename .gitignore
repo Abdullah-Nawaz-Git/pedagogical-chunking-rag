@@ -9,6 +9,7 @@ textbook-s2.pdf
 *.csv
 
 ragkit/__pycache__
+ragkit/judge/__pycache__
 ragkit/qa/__pycache__
 ragkit/retrieval/__pycache__
 ragkit/chunk/__pycache__

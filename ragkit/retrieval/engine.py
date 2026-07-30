@@ -339,6 +339,38 @@ def _chunk_text(chunk: Dict[str, Any]) -> str:
     return str(chunk.get("main_text_ar") or "")
 
 
+def _full_chunk_text(chunk: Dict[str, Any]) -> str:
+    """Full representation text including math expressions and diagram descriptions.
+
+    Matches the content that ``build_embedding_text()`` produces (``represent.py``)
+    but without the embedding-model token-limit truncation — the downstream context
+    budget handles that. For Proposed pedagogical chunks this includes unit/lesson
+    titles, math expressions, and diagram descriptions that ``main_text_ar`` alone
+    omits. For B2/B1 fixed-window chunks the extra fields are empty so the result
+    is identical to ``_chunk_text``.
+    """
+    lines: list[str] = []
+    if chunk.get("unit_title_ar"):
+        lines.append(f"الوحدة: {chunk['unit_title_ar']}")
+    if chunk.get("lesson_title_ar"):
+        lines.append(f"الدرس: {chunk['lesson_title_ar']}")
+    if chunk.get("lesson_title_en"):
+        lines.append(f"Lesson: {chunk['lesson_title_en']}")
+    if chunk.get("heading_ar"):
+        lines.append(chunk["heading_ar"])
+    if chunk.get("main_text_ar"):
+        lines.append(chunk["main_text_ar"])
+    for expr in chunk.get("math_expressions") or []:
+        if expr:
+            lines.append(f"المعادلة: {expr}")
+    for diag in chunk.get("diagrams") or []:
+        desc = diag.get("description") or ""
+        labels = diag.get("labels") or []
+        labels_str = "، ".join(str(l) for l in labels)
+        lines.append(f"[شكل هندسي: {desc}. التسميات: {labels_str}]")
+    return "\n".join(l for l in lines if l)
+
+
 def _page_range(chunk: Dict[str, Any]) -> tuple[int, int]:
     page_range = chunk.get("page_range")
     if isinstance(page_range, list) and len(page_range) == 2:
@@ -357,12 +389,24 @@ def _context_text(
     chunks_by_id: Dict[str, Dict[str, Any]],
     metadata: Dict[str, Any],
 ) -> str:
-    """Prefer the local cache text; fall back to Pinecone's stored text."""
+    """Prefer the local cache text; fall back to Pinecone's stored text.
+
+    When the chunk carries structured enrichment fields (math expressions, diagram
+    descriptions, or unit/lesson titles) beyond ``main_text_ar``, the full text is
+    reconstructed so the answer generator sees the same content that was embedded.
+    """
     chunk = chunks_by_id.get(chunk_id)
     if chunk:
         text = _chunk_text(chunk)
-        if text:
-            return text
+        if not text:
+            return str(metadata.get("content_text_ar") or "")
+        # Reconstruct the full representation when the chunk has fields that
+        # ``main_text_ar`` alone would drop (math, diagrams, titles).
+        if any([chunk.get("math_expressions"), chunk.get("diagrams"),
+                chunk.get("unit_title_ar"), chunk.get("lesson_title_ar"),
+                chunk.get("heading_ar")]):
+            return _full_chunk_text(chunk)
+        return text
     return str(metadata.get("content_text_ar") or "")
 
 

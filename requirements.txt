@@ -6,6 +6,7 @@ python-dotenv==1.0.1
 tqdm==4.66.5
 pillow==10.4.0
 cloudinary==1.41.0
+matplotlib==3.9.2
 
 # Used by the OCR baselines (ingest-B1.py / ingest-B2.py).
 # Requires the Tesseract engine + Arabic language data installed on the system:

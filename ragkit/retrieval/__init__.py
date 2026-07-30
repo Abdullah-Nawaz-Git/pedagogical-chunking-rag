@@ -35,6 +35,7 @@ Run one system, or all three plus a comparison:
     python -m experiments.retrieval_b2
     python -m experiments.retrieval_b1
     python -m ragkit.retrieval.runner --system all
+    python -m ragkit.retrieval.runner --system all --generate-answers --answer-provider vertex
 
 Add ``--retriever local`` for a deterministic offline smoke test that needs no
 credentials, and ``--generate-answers`` to also run the shared generator.
