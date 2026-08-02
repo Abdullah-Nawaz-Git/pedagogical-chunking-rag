@@ -3,9 +3,9 @@
 `ragkit` is a small toolkit for reproducing and comparing three RAG ingestion
 pipelines over Arabic high-school mathematics PDFs:
 
-- `proposed`: Gemini structured extraction + pedagogical chunking
+- `proposed`: VLM structured extraction + pedagogical chunking
 - `b1`: Tesseract OCR + fixed-window chunking
-- `b2`: Gemini structured extraction + fixed-window chunking
+- `b2`: VLM structured extraction + fixed-window chunking
 
 The code keeps rendering, embedding, and Pinecone upsert logic shared so the
 experiments differ only in the variables under study.
@@ -13,8 +13,13 @@ experiments differ only in the variables under study.
 ## Layout
 
 - `ragkit/` contains the reusable pipeline components.
-- `experiments/` contains one runnable entry point per configuration.
-- `requirements.txt` lists the Python dependencies.
+- `experiments/` contains the runnable entry points for the three pipelines, plus the evaluation and reporting scripts.
+- `extraction_experiments/` contains smaller extraction-focused experiments and sampling utilities.
+- `qa_dataset/` contains generated QA dataset artifacts, configs, and summaries.
+- `judge_eval/` contains judge-run outputs, score files, and analysis reports.
+- `retrieval_eval/` contains retrieval evaluation artifacts and comparison reports.
+- `cache/`, `cache_b1/`, and `cache_b2/` hold cached run outputs for the main and baseline pipelines.
+- `requirements.txt` lists the Python dependencies, and `credentials.json` stores local credentials for the workspace.
 
 ## Prerequisites
 
@@ -135,34 +140,50 @@ Gemini extraction.
 - Pinecone index names are isolated per experiment so results do not collide.
 
 
-rag-refactored/
-├── ragkit/                   # The REUSABLE TOOLKIT (package)
-│   ├── __init__.py           # Package definition
-│   ├── config.py             # Configuration settings (all the "knobs")
-│   ├── cache.py              # Disk storage organization
-│   ├── pipeline.py           # The main orchestrator (glues everything)
-│   ├── render.py             # PDF → PNG images
-│   ├── extract/              # Text extraction methods
-│   │   ├── gemini.py         # Google Gemini extractor
-│   │   └── tesseract.py      # OCR extractor
-│   ├── represent.py          # Format text for embedding
-│   ├── chunk/                # Chunking strategies
-│   │   ├── fixed.py          # Fixed-size chunks
-│   │   └── pedagogical.py    # Smart chunks (by topic/section)
-│   ├── embed.py              # Convert text → vectors
-│   └── index.py              # Store vectors in Pinecone
-│
-├── experiments/              # THIN EXPERIMENT SCRIPTS (use the toolkit)
-│   ├── proposed.py           # Proposed method: Gemini + pedagogical
-│   ├── b1.py                 # Baseline 1: Tesseract OCR + fixed chunks
-│   └── b2.py                 # Baseline 2: Gemini + fixed chunks
-│
-├── cache/                    # Cached outputs from runs
-│   ├── chunks.json           # Final chunks
-│   ├── embedding_texts.jsonl # Text for embeddings
-│   ├── pages/                # Rendered PNG images
-│   ├── extractions/          # Page-by-page structured data
-│   ├── bboxes/               # Diagram locations
-│   └── diagrams/             # Cropped diagram images
-│
-└── requirements.txt          # List of Python libraries to install
+project-root/
+├── ragkit/                         # Reusable pipeline components
+│   ├── __init__.py
+│   ├── cache.py
+│   ├── config.py
+│   ├── embed.py
+│   ├── index.py
+│   ├── pipeline.py
+│   ├── render.py
+│   ├── represent.py
+│   ├── chunk/                      # Chunking strategies
+│   │   ├── __init__.py
+│   │   ├── fixed.py
+│   │   └── pedagogical.py
+│   └── extract/                    # Extraction backends
+│       ├── __init__.py
+│       ├── gemini.py
+│       └── tesseract.py
+├── experiments/                    # Main experiment entry points and reports
+│   ├── __init__.py
+│   ├── b1.py
+│   ├── b2.py
+│   ├── judge.py
+│   ├── judge_b1.py
+│   ├── judge_b2.py
+│   ├── judge_proposed.py
+│   ├── judge_results_report.py
+│   ├── proposed.py
+│   ├── qa_dataset.py
+│   ├── retrieval_b1.py
+│   ├── retrieval_b2.py
+│   ├── retrieval_proposed.py
+│   └── retrieval_results_report.py
+├── extraction_experiments/         # Smaller extraction-focused experiments
+│   ├── CER.py
+│   ├── Random_Blocks_Sample.py
+│   ├── random_diagrams_sample.csv
+│   ├── random_diagrams_sample.py
+│   └── random_formula_sample.py
+├── qa_dataset/                     # QA dataset artifacts and summaries
+├── judge_eval/                     # Judge outputs and analysis reports
+├── retrieval_eval/                 # Retrieval evaluation outputs and analysis
+├── cache/                          # Main pipeline cache artifacts
+├── cache_b1/                       # Cache artifacts for baseline 1
+├── cache_b2/                       # Cache artifacts for baseline 2
+├── credentials.json                # Local credentials file
+└── requirements.txt                # Python dependencies
