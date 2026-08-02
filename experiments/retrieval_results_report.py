@@ -12,14 +12,12 @@ Run from the repository root:
 The default writes to ``retrieval_eval/analysis/``.  The input filenames are
 deliberately fixed to match :class:`ragkit.retrieval.schemas.RetrievalOutputLayout`:
 
-* ``config_used_{proposed,b2,b1}.json``
-* ``retrieval_summary_{proposed,b2,b1}.json``
-* ``retrieval_records_{proposed,b2,b1}.jsonl``
+* ``config_used_{proposed,b2}.json``
+* ``retrieval_summary_{proposed,b2}.json``
+* ``retrieval_records_{proposed,b2}.jsonl``
 * ``retrieval_comparison.json``
 
-Gold Unit Recall is charted only for Proposed and B2.  B1 has no source-block
-provenance, so its page-overlap metric is labelled ``Gold Page Recall (proxy)``
-and is never averaged with or plotted as unit-level recall.
+This report is limited to Proposed and B2; B1 artifacts are not read.
 """
 
 from __future__ import annotations
@@ -37,7 +35,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence
 
 # Match the order used by ragkit.config.RETRIEVAL_SYSTEM_ORDER without making
 # this reporting script depend on the retrieval package at import time.
-SYSTEM_ORDER: tuple[str, ...] = ("proposed", "b2", "b1")
+SYSTEM_ORDER: tuple[str, ...] = ("proposed", "b2")
 SYSTEM_SHORT_LABELS: Dict[str, str] = {
     "proposed": "Proposed",
     "b2": "B2",
@@ -54,7 +52,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI parser for the analysis-only reporting step."""
     parser = argparse.ArgumentParser(
         description=(
-            "Write tables and figures from retrieval_eval's fixed B1, B2, and "
+            "Write tables and figures from retrieval_eval's fixed B2 and "
             "Proposed retrieval artifacts."
         )
     )
@@ -170,9 +168,9 @@ def load_artifacts(input_dir: Path) -> Dict[str, Any]:
 
     comparison = _read_json(input_dir / "retrieval_comparison.json")
     comparison_systems = set(str(name) for name in comparison.get("systems") or [])
-    if comparison_systems != set(SYSTEM_ORDER):
+    if not set(SYSTEM_ORDER) <= comparison_systems:
         raise ValueError(
-            "retrieval_comparison.json must contain exactly Proposed, B2, and B1; "
+            "retrieval_comparison.json must contain at least Proposed and B2; "
             f"found {sorted(comparison_systems)!r}"
         )
 
@@ -532,11 +530,7 @@ def write_tables(data: Mapping[str, Any], output_dir: Path) -> Dict[str, List[Di
         ("corpus_chunk_count", "Corpus chunks", _integer),
     ]
     (output_dir / "overall_metrics.md").write_text(
-        "# Overall retrieval metrics\n\n"
-        + _markdown_table(overall, overall_columns)
-        + "\n\n"
-        + "> B1's Gold Page Recall is a page-overlap proxy and is not comparable "
-        "to the Gold Unit Recall of Proposed and B2.\n",
+        "# Overall retrieval metrics\n\n" + _markdown_table(overall, overall_columns) + "\n",
         encoding="utf-8",
     )
 
@@ -556,10 +550,7 @@ def write_tables(data: Mapping[str, Any], output_dir: Path) -> Dict[str, List[Di
         ("mean_context_tokens", "Mean context tokens", _integer),
     ]
     (output_dir / "by_question_type.md").write_text(
-        "# Retrieval metrics by question type\n\n"
-        + _markdown_table(by_type, type_columns)
-        + "\n\n"
-        + "> B1's recall column is a page-overlap proxy, not unit-level recall.\n",
+        "# Retrieval metrics by question type\n\n" + _markdown_table(by_type, type_columns) + "\n",
         encoding="utf-8",
     )
 
@@ -700,15 +691,7 @@ def _plot_unit_recall(data: Mapping[str, Any], figures_dir: Path, dpi: int) -> N
     axis.set_ylabel("Recall")
     axis.set_ylim(0, 1.08)
     axis.grid(axis="y", alpha=0.25)
-    figure.text(
-        0.5,
-        0.01,
-        "B1 excluded: its page-overlap proxy is not unit-level recall.",
-        ha="center",
-        fontsize=8.5,
-        color="#4D4D4D",
-    )
-    figure.tight_layout(rect=(0, 0.06, 1, 1))
+    figure.tight_layout()
     _save_figure(figure, figures_dir, "02_gold_unit_recall", dpi)
     plt.close(figure)
 
@@ -850,7 +833,6 @@ def write_report_index(data: Mapping[str, Any], tables: Mapping[str, Sequence[Ma
         ("gold_unit_recall", "Gold Unit Recall", _percent),
     ]
 
-    b1_note = str((data["summaries"]["b1"].get("gold") or {}).get("disclaimer") or "")
     lines = [
         "# Retrieval Results Analysis",
         "",
@@ -875,8 +857,6 @@ def write_report_index(data: Mapping[str, Any], tables: Mapping[str, Sequence[Ma
         _markdown_table(unit_rows, unit_columns),
         "",
         "![Gold Unit Recall](figures/02_gold_unit_recall.png)",
-        "",
-        f"> **B1 caveat.** {b1_note}",
         "",
         "## By question type",
         "",
