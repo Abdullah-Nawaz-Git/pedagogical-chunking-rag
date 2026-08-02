@@ -7,6 +7,7 @@ credentials.json
 textbook-s2.pdf
 *.xlsx
 *.csv
+/judge_eval
 
 ragkit/__pycache__
 ragkit/judge/__pycache__

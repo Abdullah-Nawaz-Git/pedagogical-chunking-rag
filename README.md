@@ -87,6 +87,21 @@ All experiments also support:
   embedding + Pinecone upsert using cached `chunks.json` and
   `embedding_texts.jsonl`
 
+## Retrieval-results tables and figures
+
+After running the three retrieval evaluations, generate the reporting bundle
+from their existing artifacts with:
+
+```bash
+python -m experiments.retrieval_results_report
+```
+
+It reads the fixed inputs in `retrieval_eval/` (`config_used_*`,
+`retrieval_summary_*`, `retrieval_records_*.jsonl`, and
+`retrieval_comparison.json`) and writes CSV/Markdown tables plus PNG/SVG figures
+to `retrieval_eval/analysis/`. Use `--input-dir` or `--output-dir` to point the
+script at another artifact bundle or destination.
+
 
 - **`--provenance-only` flag** (in `pipeline.py`)
 - Available on all three experiments. When set it forces `chunk_only=True` (skip render/extract/crop for Gemini experiments — reuses the cached `page_*.json` extractions) and `stop_after_texts=True` (skip embedding + Pinecone upsert).
