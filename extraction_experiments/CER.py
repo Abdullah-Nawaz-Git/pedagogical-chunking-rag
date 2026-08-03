@@ -41,7 +41,7 @@ def cer(hyp, ref):
     return d / len(ref_n), d, len(ref_n)
 
 # --- Load workbook ---
-wb = openpyxl.load_workbook('cer.xlsx', data_only=True)
+wb = openpyxl.load_workbook('extraction_experiments/cer.xlsx', data_only=True)
 ws = wb['cer']
 
 # --- Add output column headers ---
