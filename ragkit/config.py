@@ -398,6 +398,10 @@ class RetrievalSystemConfig:
     proxy_disclaimer: str = ""
     # Human-readable label used in report tables.
     label: str = ""
+    # The experimental role this system plays in the paper's comparison. Recorded
+    # verbatim in the judge system registry / reports so a reader always knows why
+    # a system is present (treatment, control, or baseline).
+    experimental_role: str = ""
 
     @property
     def is_unit_level(self) -> bool:
@@ -456,6 +460,7 @@ RETRIEVAL_SYSTEM_PROPOSED = RetrievalSystemConfig(
     gold_mapping_filename="gold_mapping_proposed.jsonl",
     gold_granularity=GOLD_UNIT_LEVEL,
     label="Proposed (VLM + pedagogical chunks)",
+    experimental_role="treatment (pedagogical chunk boundaries)",
 )
 
 RETRIEVAL_SYSTEM_B2 = RetrievalSystemConfig(
@@ -466,6 +471,7 @@ RETRIEVAL_SYSTEM_B2 = RetrievalSystemConfig(
     gold_mapping_filename="gold_mapping_b2.jsonl",
     gold_granularity=GOLD_UNIT_LEVEL,
     label="B2 (VLM + fixed 512-token windows)",
+    experimental_role="structured fixed-window control (isolates chunk boundaries)",
 )
 
 RETRIEVAL_SYSTEM_B1 = RetrievalSystemConfig(
@@ -478,6 +484,7 @@ RETRIEVAL_SYSTEM_B1 = RetrievalSystemConfig(
     gold_granularity=GOLD_PAGE_PROXY,
     proxy_disclaimer=B1_PROXY_DISCLAIMER,
     label="B1 (Tesseract OCR + fixed 512-token windows)",
+    experimental_role="OCR fixed-window baseline (page-overlap proxy gold)",
 )
 
 # Canonical system order for cross-system reports.
@@ -486,4 +493,315 @@ RETRIEVAL_SYSTEM_ORDER: tuple[str, ...] = ("proposed", "b2", "b1")
 RETRIEVAL_SYSTEMS = {
     system.name: system
     for system in (RETRIEVAL_SYSTEM_PROPOSED, RETRIEVAL_SYSTEM_B2, RETRIEVAL_SYSTEM_B1)
+}
+
+
+# ════════════════════════════════════════════
+# LLM-AS-JUDGE CONFIG (inspired by RAGAS dimensions)
+# ════════════════════════════════════════════
+#
+# The judge pipeline (``ragkit.judge``) is a SECONDARY, end-to-end evaluation that
+# runs ALONGSIDE — never replacing — the deterministic retrieval metrics
+# (Hit@k, MRR, Gold-Unit / Gold-Page recall) implemented in ``ragkit.retrieval``.
+#
+# It reads the FROZEN retrieval-result artifacts (``retrieval_eval/*``), the frozen
+# QA dataset, and the cached chunks, then asks a configurable LLM judge to score
+# four dimensions inspired by (but NOT identical to) the RAGAS framework. The
+# scores are deliberately called "LLM-as-judge scores inspired by RAGAS
+# dimensions", never official "RAGAS scores": retrieval-native metrics stay the
+# primary evidence and the judge is corroborating, model-dependent evidence.
+#
+# Nothing here regenerates QA data, gold mappings, chunk ids, or provenance, and
+# NO gold-derived relevance signal (gold ids, Hit@k, mapping status) is ever shown
+# to the judge — those remain for deterministic evaluation only.
+
+# The four judge dimensions, in canonical report order. Each has its OWN prompt
+# and its OWN structured response; they are scored in isolation so one dimension
+# can never leak another dimension's inputs into the model.
+JUDGE_CONTEXT_RECALL = "context_recall"
+JUDGE_CONTEXT_PRECISION = "context_precision"
+JUDGE_FAITHFULNESS = "faithfulness"
+JUDGE_ANSWER_RELEVANCY = "answer_relevancy"
+
+JUDGE_DIMENSIONS: tuple[str, ...] = (
+    JUDGE_CONTEXT_RECALL,
+    JUDGE_CONTEXT_PRECISION,
+    JUDGE_FAITHFULNESS,
+    JUDGE_ANSWER_RELEVANCY,
+)
+
+
+@dataclass(frozen=True)
+class JudgeDimensionSpec:
+    """What one judge dimension measures and which inputs its prompt receives.
+
+    The ``needs_*`` flags are the SINGLE source of truth for input isolation: the
+    scoring runner assembles a dimension's judge input strictly from the fields
+    flagged here, so e.g. Answer Relevancy never sees the retrieved contexts and
+    NO dimension ever sees gold ids, ranks, or mapping status.
+    """
+
+    name: str
+    display: str
+    question: str
+    # Inputs the dimension's prompt is allowed to receive.
+    needs_question: bool = True
+    needs_reference_answer: bool = False
+    needs_contexts: bool = False
+    needs_generated_answer: bool = False
+
+    @property
+    def requires_generation(self) -> bool:
+        """Dimensions that need a generated answer only run in generation mode."""
+        return self.needs_generated_answer
+
+
+# The isolated input contract per dimension (matches the project plan exactly).
+JUDGE_DIMENSION_SPECS: "dict[str, JudgeDimensionSpec]" = {
+    JUDGE_CONTEXT_RECALL: JudgeDimensionSpec(
+        name=JUDGE_CONTEXT_RECALL,
+        display="Context Recall",
+        question=(
+            "Did the retrieved contexts contain the information needed to answer "
+            "the question according to the reference answer?"
+        ),
+        needs_reference_answer=True,
+        needs_contexts=True,
+    ),
+    JUDGE_CONTEXT_PRECISION: JudgeDimensionSpec(
+        name=JUDGE_CONTEXT_PRECISION,
+        display="Context Precision",
+        question=(
+            "Are useful retrieved contexts ranked above irrelevant or less useful "
+            "contexts?"
+        ),
+        needs_reference_answer=True,
+        needs_contexts=True,
+    ),
+    JUDGE_FAITHFULNESS: JudgeDimensionSpec(
+        name=JUDGE_FAITHFULNESS,
+        display="Faithfulness",
+        question="Is the generated answer supported by the retrieved contexts?",
+        needs_contexts=True,
+        needs_generated_answer=True,
+    ),
+    JUDGE_ANSWER_RELEVANCY: JudgeDimensionSpec(
+        name=JUDGE_ANSWER_RELEVANCY,
+        display="Answer Relevancy",
+        question="Does the generated answer directly answer the question?",
+        needs_generated_answer=True,
+    ),
+}
+
+# Run modes. ``retrieval_only`` scores the two context dimensions (no generated
+# answer needed); ``generation`` additionally scores faithfulness + answer
+# relevancy; ``auto`` picks per item based on whether a generated answer exists.
+JUDGE_MODE_RETRIEVAL_ONLY = "retrieval_only"
+JUDGE_MODE_GENERATION = "generation"
+JUDGE_MODE_AUTO = "auto"
+
+# Judge providers. ``mock`` is deterministic + offline (smoke tests, CI). The two
+# real providers run through Vertex AI; Claude via Vertex is the default judge.
+JUDGE_PROVIDER_MOCK = "mock"
+JUDGE_PROVIDER_VERTEX_ANTHROPIC = "vertex_anthropic"  # Claude Sonnet via Vertex
+JUDGE_PROVIDER_VERTEX_GEMINI = "vertex_gemini"        # configurable alternative
+
+
+@dataclass(frozen=True)
+class JudgeEnvVars:
+    """Extra environment-variable names the judge reads (beyond ``EnvVars``).
+
+    Only NAMES live here, never secrets, matching ``EnvVars``. The Vertex project
+    and Gemini location come from the shared ``EnvVars``; Claude-on-Vertex often
+    needs its own region, so it has a dedicated (optional) override.
+    """
+
+    judge_model: str = "JUDGE_MODEL"
+    # Claude on Vertex is served from a subset of regions. This optional override
+    # falls back to GOOGLE_CLOUD_LOCATION and then to ``anthropic_location_default``.
+    anthropic_location: str = "JUDGE_VERTEX_LOCATION"
+    anthropic_location_default: str = "us-east5"
+
+
+@dataclass(frozen=True)
+class JudgeModelConfig:
+    """Judge-model knobs — held IDENTICAL across systems so the judge is never a
+    confound in the Proposed-vs-control comparison.
+
+    No model id is baked into code: the id is read from ``JUDGE_MODEL`` and only
+    falls back to ``model_default`` when that env var is unset. The default names
+    Gemini on Vertex; set ``JUDGE_MODEL`` to pin a specific snapshot.
+    """
+
+    # Provider is chosen at the CLI / config; default is Gemini via Vertex.
+    provider: str = JUDGE_PROVIDER_VERTEX_GEMINI
+    model_env_var: str = "JUDGE_MODEL"
+    # Overridable default. Pin ``JUDGE_MODEL`` to a Vertex snapshot when a
+    # reproducible vendor release identifier is required for a study.
+    model_default: str = "gemini-3.1-pro-preview"
+    # Low-variance decoding per the spec (temperature 0 / lowest supported).
+    temperature: float = 0.0
+    # Cap the judge's JSON response; a score + short rationale is small, but the
+    # cap is generous so a long rationale never gets truncated mid-string (which
+    # previously forced whole-score loss and required parser-side recovery).
+    max_output_tokens: int = 2048
+    # Structured JSON-only output is requested from every provider.
+    response_json_only: bool = True
+
+
+@dataclass(frozen=True)
+class JudgeContextConfig:
+    """Context-fairness knobs — IDENTICAL across systems.
+
+    Fairness is the whole point: Proposed must not look stronger merely because it
+    is handed a longer context. The judge reuses the SAME frozen context the answer
+    generator saw whenever the retrieval record preserved it (its
+    ``context_chunk_ids``); otherwise it re-assembles the context deterministically
+    under this shared budget. Either way the token count and any truncation are
+    logged on every record.
+    """
+
+    # Must match the retrieval run's AnswerGenerationConfig.context_budget_tokens
+    # so the judge scores the same-sized window every system's generator saw.
+    context_budget_tokens: int = 2560
+    # Estimate-only model-token accounting (same convention as the rest of ragkit).
+    chars_per_token: int = 3
+    # Prefer reconstructing the exact frozen context from the record's
+    # context_chunk_ids; fall back to re-assembling from retrieved chunks.
+    prefer_recorded_context: bool = True
+
+
+@dataclass(frozen=True)
+class JudgeAggregationConfig:
+    """Paired-comparison + bootstrap knobs for aggregate reporting."""
+
+    # The key paper comparison: treatment vs the structured fixed-window control.
+    primary_pair: tuple[str, str] = ("proposed", "b2")
+    # Bootstrap CIs on paired per-item score differences (matches the retrieval
+    # analysis style). Set n_resamples=0 to skip CIs entirely.
+    bootstrap_resamples: int = 2000
+    bootstrap_confidence: float = 0.95
+    bootstrap_seed: int = 7
+
+
+@dataclass(frozen=True)
+class JudgeSystemConfig:
+    """The per-system half of a judge run — configuration only.
+
+    Composes the existing ``RetrievalSystemConfig`` (so cache paths, gold-mapping
+    filenames, labels, granularity, and the B1 proxy disclaimer are reused verbatim
+    and can never drift from the retrieval pipeline) and adds the judge-specific
+    ``experimental_role`` / ``mapping_type`` that the reports surface. Adding a
+    system means adding one of these — never branching the judge engine on a name.
+    """
+
+    retrieval: RetrievalSystemConfig
+
+    @property
+    def name(self) -> str:
+        return self.retrieval.name
+
+    @property
+    def label(self) -> str:
+        return self.retrieval.label or self.retrieval.name
+
+    @property
+    def experimental_role(self) -> str:
+        return self.retrieval.experimental_role
+
+    @property
+    def chunks_path(self) -> str:
+        return self.retrieval.chunks_path
+
+    @property
+    def gold_mapping_filename(self) -> str:
+        return self.retrieval.gold_mapping_filename
+
+    @property
+    def gold_granularity(self) -> str:
+        return self.retrieval.gold_granularity
+
+    @property
+    def is_unit_level(self) -> bool:
+        return self.retrieval.is_unit_level
+
+    @property
+    def mapping_type(self) -> str:
+        """Human/report label for the gold mapping this system's provenance yields.
+
+        This is reporting metadata ONLY — it is never shown to the judge, which
+        sees no gold-derived signal at all.
+        """
+        return (
+            "true_source_block_unit"
+            if self.retrieval.is_unit_level
+            else "page_overlap_proxy"
+        )
+
+    @property
+    def mapping_caveat(self) -> str:
+        """Non-empty only for B1's page-overlap proxy (reused from retrieval)."""
+        return self.retrieval.proxy_disclaimer
+
+
+@dataclass(frozen=True)
+class JudgeExperimentConfig:
+    """A complete description of one judge-scoring run.
+
+    Mirrors ``RetrievalExperimentConfig``: the per-system variable sits at the top
+    and every shared config below it is identical across systems, so the only thing
+    that varies between runs is the system being judged.
+    """
+
+    # ── The system under evaluation ───────────────────────────────────────
+    system: JudgeSystemConfig
+
+    # ── Frozen inputs (never regenerated by this pipeline) ────────────────
+    qa_dataset_dir: str = "qa_dataset"
+    qa_dataset_filename: str = "qa_dataset_v1.jsonl"
+    # Where the retrieval pipeline wrote its per-system records the judge reads.
+    retrieval_eval_dir: str = "retrieval_eval"
+    # Directory that receives every judge artifact.
+    output_dir: str = "judge_eval"
+
+    # ── Shared stage configs (identical across systems) ───────────────────
+    model: JudgeModelConfig = field(default_factory=JudgeModelConfig)
+    context: JudgeContextConfig = field(default_factory=JudgeContextConfig)
+    aggregation: JudgeAggregationConfig = field(default_factory=JudgeAggregationConfig)
+    answer: AnswerGenerationConfig = field(default_factory=AnswerGenerationConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    env: EnvVars = field(default_factory=EnvVars)
+    judge_env: JudgeEnvVars = field(default_factory=JudgeEnvVars)
+
+    # ── Behaviour ─────────────────────────────────────────────────────────
+    mode: str = JUDGE_MODE_AUTO
+    # Which dimensions to score (subset of JUDGE_DIMENSIONS); empty means "all
+    # dimensions eligible under the current mode".
+    dimensions: tuple[str, ...] = JUDGE_DIMENSIONS
+    # Long runs are resumable: already-scored (qa_id, system, metric) triples are
+    # skipped on restart when this is set.
+    resume: bool = True
+    # Bounded retries on transient API / parse failures before recording an error.
+    max_retries: int = 2
+    random_seed: int = 7
+    prompt_version: str = "v1"
+
+
+# The three systems under study, wrapping the retrieval registry so the judge and
+# retrieval pipelines can never disagree about a system's paths or granularity.
+JUDGE_SYSTEM_PROPOSED = JudgeSystemConfig(retrieval=RETRIEVAL_SYSTEM_PROPOSED)
+JUDGE_SYSTEM_B2 = JudgeSystemConfig(retrieval=RETRIEVAL_SYSTEM_B2)
+JUDGE_SYSTEM_B1 = JudgeSystemConfig(retrieval=RETRIEVAL_SYSTEM_B1)
+
+# Canonical judge system order (treatment, structured control, OCR baseline).
+JUDGE_SYSTEM_ORDER: tuple[str, ...] = ("proposed", "b2", "b1")
+
+# The key paper comparison isolates chunk boundaries: Proposed pedagogical
+# chunking vs the structured fixed-window control (B2), holding structured
+# extraction + representation constant.
+JUDGE_PRIMARY_COMPARISON: tuple[str, str] = ("proposed", "b2")
+
+JUDGE_SYSTEMS = {
+    system.name: system
+    for system in (JUDGE_SYSTEM_PROPOSED, JUDGE_SYSTEM_B2, JUDGE_SYSTEM_B1)
 }
