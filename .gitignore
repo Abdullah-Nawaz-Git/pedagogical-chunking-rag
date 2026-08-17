@@ -3,7 +3,7 @@
 /cache_b2
 /Knowledge_Base
 .env
-credentials.json
+credentials*.json
 textbook-s2.pdf
 *.xlsx
 *.csv
